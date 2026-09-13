@@ -1,0 +1,26 @@
+[Unit]
+Description=go2rtc for Home Assistant camera WebRTC
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=go2rtc
+Group=go2rtc
+ExecStart=/usr/local/bin/go2rtc -config /var/lib/go2rtc/go2rtc.yaml
+Restart=on-failure
+RestartSec=2
+StateDirectory=go2rtc
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

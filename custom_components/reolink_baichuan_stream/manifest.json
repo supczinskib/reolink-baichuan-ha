@@ -1,0 +1,11 @@
+{
+  "domain": "reolink_baichuan_stream",
+  "name": "Reolink Baichuan stream source",
+  "version": "1.0.0",
+  "documentation": "https://reolink.env.pl",
+  "issue_tracker": "https://github.com/supczinskib/reolink-baichuan-ha/issues",
+  "dependencies": ["reolink", "go2rtc"],
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "codeowners": ["@supczinskib"]
+}

@@ -1,0 +1,7 @@
+title: Reolink Baichuan WebRTC for Home Assistant
+description: Low-latency Reolink streaming and integrated camera controls for Home Assistant
+url: https://reolink.env.pl
+repository: supczinskib/reolink-baichuan-ha
+theme: jekyll-theme-primer
+plugins:
+  - jekyll-seo-tag
