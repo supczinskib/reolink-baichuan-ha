@@ -1098,11 +1098,15 @@ const addControls = async (stream) => {
   });
   const orientation = matchMedia("(orientation: landscape)");
   const isPhone = navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) <= 600;
+  const isCompanionApp = /\bHome Assistant\//.test(navigator.userAgent);
+  const isDesktopBrowser = !isPhone && !isCompanionApp &&
+    !/Android|iPad|iPhone|iPod/i.test(navigator.userAgent);
   let manualFullscreen = false;
   let landscapeFullscreenDismissed = false;
   let lastLandscape = orientation.matches;
   let layoutListening = false;
   let landscapeFallbackTimer;
+  let browserFullscreenTarget;
   const forcedContainerStyles = [
     "position", "top", "right", "bottom", "left", "width", "min-width", "max-width",
     "height", "min-height", "max-height", "margin", "overflow", "background",
@@ -1199,6 +1203,46 @@ const addControls = async (stream) => {
     "--ha-dialog-surface-background": "#000",
     overflow: "hidden",
   };
+  const browserFullscreenElement = () =>
+    document.fullscreenElement || document.webkitFullscreenElement;
+  const requestBrowserFullscreen = async () => {
+    if (!isDesktopBrowser) return false;
+    const request = stream.requestFullscreen || stream.webkitRequestFullscreen;
+    if (typeof request !== "function") return false;
+    try {
+      browserFullscreenTarget = stream;
+      await Promise.resolve(request.call(stream));
+      return true;
+    } catch (_err) {
+      browserFullscreenTarget = undefined;
+      return false;
+    }
+  };
+  const exitBrowserFullscreen = async () => {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (!browserFullscreenElement() || typeof exit !== "function") {
+      browserFullscreenTarget = undefined;
+      return;
+    }
+    try {
+      await Promise.resolve(exit.call(document));
+    } catch (_err) {}
+    browserFullscreenTarget = undefined;
+  };
+  const applyFullscreenPlayerStyles = (state) => {
+    stream.shadowRoot?.querySelectorAll("ha-web-rtc-player,ha-hls-player").forEach((player) => {
+      if (!state.players.has(player)) {
+        state.players.set(player, {
+          aspectRatio: player.aspectRatio,
+          maxHeight: player.style.getPropertyValue("--video-max-height"),
+          maxHeightPriority: player.style.getPropertyPriority("--video-max-height"),
+        });
+      }
+      player.aspectRatio = undefined;
+      player.style.setProperty("--video-max-height", "100dvh");
+      player.requestUpdate?.();
+    });
+  };
   const setDialogFullscreen = (active) => {
     let state = stream[FULLSCREEN_STATE];
     const entering = active && !state;
@@ -1232,25 +1276,16 @@ const addControls = async (stream) => {
       };
       stream[FULLSCREEN_STATE] = state;
     }
-    if (entering && state) {
-      state.adaptive.mode = "dialog";
-      state.adaptive.withoutHeader = true;
-      state.actions?.style.setProperty("display", "none", "important");
-      Object.entries(fullscreenStyles).forEach(([name, value]) => {
-        state.adaptive.style.setProperty(name, value);
-      });
-      stream.shadowRoot?.querySelectorAll("ha-web-rtc-player,ha-hls-player").forEach((player) => {
-        if (!state.players.has(player)) {
-          state.players.set(player, {
-            aspectRatio: player.aspectRatio,
-            maxHeight: player.style.getPropertyValue("--video-max-height"),
-            maxHeightPriority: player.style.getPropertyPriority("--video-max-height"),
-          });
-        }
-        player.aspectRatio = undefined;
-        player.style.setProperty("--video-max-height", "100dvh");
-        player.requestUpdate?.();
-      });
+    if (active && state) {
+      if (entering) {
+        state.adaptive.mode = "dialog";
+        state.adaptive.withoutHeader = true;
+        state.actions?.style.setProperty("display", "none", "important");
+        Object.entries(fullscreenStyles).forEach(([name, value]) => {
+          state.adaptive.style.setProperty(name, value);
+        });
+      }
+      applyFullscreenPlayerStyles(state);
       state.adaptive.requestUpdate?.();
     } else if (leaving && state) {
       clearLandscapeFallback();
@@ -1299,7 +1334,8 @@ const addControls = async (stream) => {
     const automatic = isPhone && landscape && !landscapeFullscreenDismissed;
     const fullscreenActive = manualFullscreen || automatic;
     setDialogFullscreen(fullscreenActive);
-    if (manualFullscreen && !landscape && !stream.classList.contains("rw-force-landscape")) {
+    if (isPhone && manualFullscreen && !landscape &&
+        !stream.classList.contains("rw-force-landscape")) {
       applyLandscapeFallback();
     }
     stream.classList.toggle("rw-overlay-controls", landscape || fullscreenActive);
@@ -1328,8 +1364,19 @@ const addControls = async (stream) => {
     if (!layoutListening) {
       orientation.addEventListener("change", syncLayout);
       window.addEventListener("resize", syncLayout);
+      if (isDesktopBrowser) {
+        document.addEventListener("fullscreenchange", browserFullscreenChanged);
+        document.addEventListener("webkitfullscreenchange", browserFullscreenChanged);
+      }
       layoutListening = true;
     }
+    syncLayout();
+  };
+  const browserFullscreenChanged = () => {
+    if (browserFullscreenElement()) return;
+    browserFullscreenTarget = undefined;
+    if (!manualFullscreen) return;
+    manualFullscreen = false;
     syncLayout();
   };
   stream[LAYOUT_START] = startLayout;
@@ -1337,23 +1384,31 @@ const addControls = async (stream) => {
     clearLandscapeFallback();
     orientation.removeEventListener("change", syncLayout);
     window.removeEventListener("resize", syncLayout);
+    document.removeEventListener("fullscreenchange", browserFullscreenChanged);
+    document.removeEventListener("webkitfullscreenchange", browserFullscreenChanged);
     layoutListening = false;
     unlockOrientation();
+    exitBrowserFullscreen();
     setDialogFullscreen(false);
   };
-  fullscreen.addEventListener("click", () => {
+  fullscreen.addEventListener("click", async () => {
     const automatic = isPhone && orientation.matches && !landscapeFullscreenDismissed;
     const fullscreenActive = manualFullscreen || automatic;
     if (fullscreenActive) {
       clearLandscapeFallback();
       manualFullscreen = false;
       landscapeFullscreenDismissed = orientation.matches;
-      lockOrientation("portrait-primary");
+      if (isDesktopBrowser) await exitBrowserFullscreen();
+      else lockOrientation("portrait-primary");
       syncLayout();
     } else {
       manualFullscreen = true;
       landscapeFullscreenDismissed = false;
       syncLayout();
+      if (isDesktopBrowser) {
+        await requestBrowserFullscreen();
+        return;
+      }
       lockOrientation("landscape").then((locked) => {
         if (!locked && manualFullscreen && !orientation.matches) {
           applyLandscapeFallback();
